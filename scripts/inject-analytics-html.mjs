@@ -7,8 +7,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const buildIndexPath = path.resolve(projectRoot, "build", "index.html");
-const markerStart = "<!-- analytics:start -->";
-const markerEnd = "<!-- analytics:end -->";
+const analyticsMarkerStart = "<!-- analytics:start -->";
+const analyticsMarkerEnd = "<!-- analytics:end -->";
+const ogpMarkerStart = "<!-- ogp:start -->";
+const ogpMarkerEnd = "<!-- ogp:end -->";
 
 const sanitize = (value) => {
   if (typeof value !== "string") {
@@ -85,6 +87,73 @@ const createMetaPixelBlock = (metaPixelId, metaAppId) => {
   return [script.join("\n"), noscript].join("\n");
 };
 
+const escapeHtml = (str) => {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+};
+
+const createOgpBlock = (env) => {
+  const ogTitle = sanitize(env.VITE_OG_TITLE);
+  const ogDescription = sanitize(env.VITE_OG_DESCRIPTION);
+  const ogSiteName = sanitize(env.VITE_OG_SITE_NAME);
+  const ogUrl = sanitize(env.VITE_OG_URL);
+  const ogImageUrl = sanitize(env.VITE_OG_IMAGE_URL);
+  const ogImageWidth = sanitize(env.VITE_OG_IMAGE_WIDTH);
+  const ogImageHeight = sanitize(env.VITE_OG_IMAGE_HEIGHT);
+  const twitterCard = sanitize(env.VITE_TWITTER_CARD) || "summary_large_image";
+  const twitterSite = sanitize(env.VITE_TWITTER_SITE);
+  const twitterCreator = sanitize(env.VITE_TWITTER_CREATOR);
+
+  const tags = [];
+
+  // OGP tags
+  if (ogTitle) {
+    tags.push(`<meta property="og:title" content="${escapeHtml(ogTitle)}" />`);
+  }
+  if (ogDescription) {
+    tags.push(`<meta property="og:description" content="${escapeHtml(ogDescription)}" />`);
+  }
+  tags.push(`<meta property="og:type" content="website" />`);
+  if (ogSiteName) {
+    tags.push(`<meta property="og:site_name" content="${escapeHtml(ogSiteName)}" />`);
+  }
+  if (ogUrl) {
+    tags.push(`<meta property="og:url" content="${escapeHtml(ogUrl)}" />`);
+  }
+  if (ogImageUrl) {
+    tags.push(`<meta property="og:image" content="${escapeHtml(ogImageUrl)}" />`);
+  }
+  if (ogImageWidth) {
+    tags.push(`<meta property="og:image:width" content="${escapeHtml(ogImageWidth)}" />`);
+  }
+  if (ogImageHeight) {
+    tags.push(`<meta property="og:image:height" content="${escapeHtml(ogImageHeight)}" />`);
+  }
+
+  // Twitter Card tags
+  tags.push(`<meta name="twitter:card" content="${escapeHtml(twitterCard)}" />`);
+  if (ogTitle) {
+    tags.push(`<meta name="twitter:title" content="${escapeHtml(ogTitle)}" />`);
+  }
+  if (ogDescription) {
+    tags.push(`<meta name="twitter:description" content="${escapeHtml(ogDescription)}" />`);
+  }
+  if (ogImageUrl) {
+    tags.push(`<meta name="twitter:image" content="${escapeHtml(ogImageUrl)}" />`);
+  }
+  if (twitterSite) {
+    tags.push(`<meta name="twitter:site" content="${escapeHtml(twitterSite)}" />`);
+  }
+  if (twitterCreator) {
+    tags.push(`<meta name="twitter:creator" content="${escapeHtml(twitterCreator)}" />`);
+  }
+
+  return tags.join("\n    ");
+};
+
 const injectAnalytics = async () => {
   try {
     await fs.access(buildIndexPath);
@@ -101,29 +170,37 @@ const injectAnalytics = async () => {
   const metaPixelId = sanitize(env.VITE_META_PIXEL_ID);
   const metaAppId = sanitize(env.VITE_META_APP_ID);
 
-  const blocks = [
+  const analyticsBlocks = [
     createGoogleTagBlock(gaMeasurementId, gaAdsId),
     createMetaPixelBlock(metaPixelId, metaAppId),
   ].filter(Boolean);
 
   let html = await fs.readFile(buildIndexPath, "utf-8");
-  const markerPattern = new RegExp(`${markerStart}[\\s\\S]*?${markerEnd}\\n?`, "g");
-  html = html.replace(markerPattern, "");
 
-  if (blocks.length === 0) {
-    await fs.writeFile(buildIndexPath, html, "utf-8");
-    return;
+  // Remove existing analytics markers
+  const analyticsMarkerPattern = new RegExp(`${analyticsMarkerStart}[\\s\\S]*?${analyticsMarkerEnd}\\n?`, "g");
+  html = html.replace(analyticsMarkerPattern, "");
+
+  // Inject OGP tags
+  const ogpBlock = createOgpBlock(env);
+  const ogpMarkerPattern = new RegExp(`${ogpMarkerStart}[\\s\\S]*?${ogpMarkerEnd}`, "g");
+  if (ogpBlock) {
+    html = html.replace(ogpMarkerPattern, `${ogpMarkerStart}\n    ${ogpBlock}\n    ${ogpMarkerEnd}`);
+    console.log("Injected OGP tags into build/index.html");
   }
 
-  const analyticsBlock = [markerStart, ...blocks, markerEnd].join("\n");
-  if (html.includes("</head>")) {
-    html = html.replace("</head>", `${analyticsBlock}\n</head>`);
-  } else {
-    html += `\n${analyticsBlock}\n`;
+  // Inject analytics tags
+  if (analyticsBlocks.length > 0) {
+    const analyticsBlock = [analyticsMarkerStart, ...analyticsBlocks, analyticsMarkerEnd].join("\n");
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${analyticsBlock}\n</head>`);
+    } else {
+      html += `\n${analyticsBlock}\n`;
+    }
+    console.log("Injected analytics tags into build/index.html");
   }
 
   await fs.writeFile(buildIndexPath, html, "utf-8");
-  console.log("Injected analytics tags into build/index.html");
 };
 
 injectAnalytics().catch((error) => {

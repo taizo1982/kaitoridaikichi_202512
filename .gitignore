@@ -20,3 +20,4 @@ Thumbs.db
 .next
 .phpunit.result.cache
 .claude/
+.vercel
